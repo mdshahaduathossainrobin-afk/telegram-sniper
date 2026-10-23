@@ -31,46 +31,48 @@ app = Flask(__name__)
 def home():
     return f"Telegram Multi-Claimer is Active with {len(clients)} accounts!"
 
-async def process_account_action(client, message_text, buttons):
-    try:
-        # 1. PROMO CODE EXTRACTION
-        if "NEW PROMO CODE" in message_text or "Code:" in message_text:
-            match = re.search(r'Code\s*:\s*([A-Za-z0-9\-]{5,})', message_text, re.IGNORECASE)
+async def broadcast_action(message_text, buttons):
+    """এই ফাংশনটি ৪টি অ্যাকাউন্ট দিয়েই একসাথে বটে মেসেজ বা ক্লিক পাঠাবে"""
+    for index, client in enumerate(clients, start=1):
+        try:
+            # 1. PROMO CODE EXTRACTION
+            if "NEW PROMO CODE" in message_text or "Code:" in message_text:
+                match = re.search(r'Code\s*:\s*([A-Za-z0-9\-]{5,})', message_text, re.IGNORECASE)
 
-            if match:
-                extracted_code = match.group(1).strip()
-                await client.send_message(BOT_USERNAME, extracted_code)
-                logging.info(f"⚡ Instant Code '{extracted_code}' sent from an account!")
-                return
+                if match:
+                    extracted_code = match.group(1).strip()
+                    await client.send_message(BOT_USERNAME, extracted_code)
+                    logging.info(f"⚡ [Account {index}] Instant Code '{extracted_code}' sent!")
+                    continue
 
-        # 2. GIVEAWAY AUTO-PARTICIPATE
-        if buttons:
-            for i, row in enumerate(buttons):
-                for j, button in enumerate(row):
-                    button_text = getattr(button, 'text', '') or ''
-                    
-                    if "participate" in button_text.lower() or "join" in button_text.lower():
-                        await client.click(i, j)
-                        logging.info("🎉 Clicked 'Participate' button!")
-                        return
+            # 2. GIVEAWAY AUTO-PARTICIPATE
+            if buttons:
+                for i, row in enumerate(buttons):
+                    for j, button in enumerate(row):
+                        button_text = getattr(button, 'text', '') or ''
+                        
+                        if "participate" in button_text.lower() or "join" in button_text.lower():
+                            await client.click(i, j)
+                            logging.info(f"🎉 [Account {index}] Clicked 'Participate' button!")
+                            break
 
-                    target_url = getattr(button, 'url', None) or getattr(button.button, 'url', None)
-                    if target_url and "start=" in target_url:
-                        promo_payload = target_url.split("start=")[-1]
-                        await client.send_message(BOT_USERNAME, f"/start {promo_payload}")
-                        logging.info(f"⚡ Instant Fallback payload sent!")
-                        return
+                        target_url = getattr(button, 'url', None) or getattr(button.button, 'url', None)
+                        if target_url and "start=" in target_url:
+                            promo_payload = target_url.split("start=")[-1]
+                            await client.send_message(BOT_USERNAME, f"/start {promo_payload}")
+                            logging.info(f"⚡ [Account {index}] Instant Fallback payload sent!")
+                            break
+        except Exception as e:
+            logging.error(f"⚠️ Error in Account {index}: {e}")
 
-    except Exception as e:
-        logging.error(f"⚠️ Error processing account: {e}")
-
-# Sob client-er jonno event handler set kora
-for client in clients:
-    @client.on(events.NewMessage())
-    async def global_handler(event, current_client=client):
+# যেকোনো একটি অ্যাকাউন্ট মেসেজ দেখলেই ৪টি অ্যাকাউন্ট একসাথে ট্রিগার হবে
+if clients:
+    @clients[0].on(events.NewMessage())
+    async def global_handler(event):
         message_text = event.message.message or ""
         buttons = event.message.buttons
-        asyncio.create_task(process_account_action(current_client, message_text, buttons))
+        # একসঙ্গে ৪টি অ্যাকাউন্ট থেকে টাস্ক রান করার জন্য asyncio.gather ব্যবহার করা হলো
+        asyncio.create_task(broadcast_action(message_text, buttons))
 
 def run_telegram_bot():
     loop = asyncio.new_event_loop()

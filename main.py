@@ -3,6 +3,7 @@ import asyncio
 import os
 import re
 import threading
+import time
 from flask import Flask
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
@@ -24,9 +25,12 @@ for key in session_keys:
 
 BOT_USERNAME = 'klyxx_bot'
 
-# Duplicate prevention-er jonno processed codes-er list o lock
-processed_codes = set()
+# Duplicate prevention-er jonno dictionary (Code -> Timestamp) o lock
+processed_codes = {}
 lock = asyncio.Lock()
+
+# Code koey minute memory-te thakbe (30 Minutes = 1800 Seconds)
+CODE_EXPIRY_SECONDS = 1800
 
 # Flask Web Server
 app = Flask(__name__)
@@ -55,12 +59,21 @@ async def handle_incoming_message(event):
         
         if match:
             extracted_code = match.group(1).strip()
+            current_time = time.time()
             
-            # SPAM PREVENTION: Check and Lock System (যাতে ডুপ্লিকেট বা স্প্যাম না হয়)
+            # SPAM PREVENTION & TIME-BASED EXPIRY SYSTEM
             async with lock:
+                # Purono ebong expire hoye jaowa code gulo memory theke muche fela
+                expired_keys = [code for code, timestamp in processed_codes.items() if current_time - timestamp > CODE_EXPIRY_SECONDS]
+                for code in expired_keys:
+                    del processed_codes[code]
+
+                # Code-ti jodi ekhono active memory-te thake, tobe ignore korbe
                 if extracted_code in processed_codes:
-                    return # যদি কোডটি ইতিমধ্যে প্রসেস হয়ে থাকে, তবে আর কাজ করবে না
-                processed_codes.add(extracted_code)
+                    return 
+
+                # Notun code ke current timestamp soho save kora
+                processed_codes[extracted_code] = current_time
 
             logging.info(f"🚀 New Code Detected: {extracted_code}. Triggering all {len(clients)} accounts!")
             await broadcast_action(extracted_code, buttons)

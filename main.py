@@ -25,7 +25,7 @@ for key in session_keys:
 
 BOT_USERNAME = 'klyxx_bot'
 
-# Duplicate prevention-er jonno dictionary (Code -> Timestamp) o lock
+# Duplicate prevention-er jonno dictionary o lock
 processed_codes = {}
 lock = asyncio.Lock()
 
@@ -46,16 +46,16 @@ async def broadcast_action(extracted_code, buttons):
         tasks.append(client.send_message(BOT_USERNAME, extracted_code))
         logging.info(f"⚡ [Account {index}] Instant Code '{extracted_code}' queueing...")
     
-    # ৪টি অ্যাকাউন্ট থেকে একযোগে (Parallel) পাঠাতে asyncio.gather ব্যবহার করা হয়েছে
     await asyncio.gather(*tasks, return_exceptions=True)
 
 async def handle_incoming_message(event):
-    message_text = event.message.message or ""
+    # event.raw_text ব্যবহারের ফলে চ্যানেলের মিডিয়া ক্যাপশন বা যেকোনো ফরম্যাট নিখুঁতভাবে চলে আসবে
+    message_text = event.raw_text or event.message.message or ""
     buttons = event.message.buttons
 
-    # 1. PROMO CODE EXTRACTION
-    if "NEW PROMO CODE" in message_text or "Code:" in message_text or "Code" in message_text:
-        match = re.search(r'Code\s*:\s*([A-Za-z0-9\-]{5,})', message_text, re.IGNORECASE)
+    if message_text:
+        # নিখুঁত Regex প্যাটার্ন যা চ্যানেলের কোড ধরে ফেলবে
+        match = re.search(r'Code\s*[:\-]\s*([A-Za-z0-9\-]+)', message_text, re.IGNORECASE)
         
         if match:
             extracted_code = match.group(1).strip()
@@ -63,26 +63,21 @@ async def handle_incoming_message(event):
             
             # SPAM PREVENTION & TIME-BASED EXPIRY SYSTEM
             async with lock:
-                # Purono ebong expire hoye jaowa code gulo memory theke muche fela
                 expired_keys = [code for code, timestamp in processed_codes.items() if current_time - timestamp > CODE_EXPIRY_SECONDS]
                 for code in expired_keys:
                     del processed_codes[code]
 
-                # Code-ti jodi ekhono active memory-te thake, tobe ignore korbe
                 if extracted_code in processed_codes:
                     return 
 
-                # Notun code ke current timestamp soho save kora
                 processed_codes[extracted_code] = current_time
 
             logging.info(f"🚀 New Code Detected: {extracted_code}. Triggering all {len(clients)} accounts!")
             await broadcast_action(extracted_code, buttons)
 
-# ৪টি অ্যাকাউন্টকেই স্বাধীন নজরদারিতে (Listener) যুক্ত করা হলো
-for i, client in enumerate(clients):
-    @client.on(events.NewMessage())
-    async def global_handler(event):
-        asyncio.create_task(handle_incoming_message(event))
+# ৪টি অ্যাকাউন্টেই নিখুঁতভাবে ইভেন্ট হ্যান্ডলার যুক্ত করার জন্য সঠিক পদ্ধতি
+for client in clients:
+    client.add_event_handler(handle_incoming_message, events.NewMessage())
 
 def run_telegram_bot():
     loop = asyncio.new_event_loop()

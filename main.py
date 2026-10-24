@@ -38,34 +38,53 @@ app = Flask(__name__)
 def home():
     return f"Telegram Multi-Claimer is Active with {len(clients)} accounts!"
 
-async def broadcast_action(extracted_code, event):
-    tasks = []
+async def click_participate_button(event):
+    """
+    গ্যারান্টিড বাটন ক্লিক লজিক: Direct Telethon Event Clicker
+    """
+    giveaway_key = f"{event.chat_id}_{event.id}"
     
-    # 1. Promo Code Direct Bot-e Send Kora
-    if extracted_code:
-        for index, client in enumerate(clients, start=1):
-            tasks.append(client.send_message(BOT_USERNAME, extracted_code))
-            logging.info(f"⚡ [Account {index}] Instant Code '{extracted_code}' sending...")
+    if giveaway_key in processed_giveaways:
+        return
 
-    # 2. STRICT PARTICIPATE BUTTON AUTO-CLICK
-    if event and event.buttons:
-        giveaway_key = f"{event.chat_id}_{event.id}"
-        if giveaway_key not in processed_giveaways:
-            for row in event.buttons:
-                for button in row:
-                    btn_text = (button.text or "").lower()
-                    # Strictly check only for 'participate'
-                    if "participate" in btn_text:
+    # বোতামের টেক্সট ফিল্টারিং
+    button_found = False
+    if event.reply_markup:
+        try:
+            for row_idx, row in enumerate(event.reply_markup.rows):
+                for col_idx, button in enumerate(row.buttons):
+                    btn_text = getattr(button, 'text', '') or ""
+                    if "participate" in btn_text.lower():
+                        button_found = True
                         processed_giveaways.add(giveaway_key)
-                        for index, client in enumerate(clients, start=1):
-                            tasks.append(button.click())
-                            logging.info(f"🔘 [Account {index}] Auto-Clicked Participate Button: {button.text}")
-
-    if tasks:
-        await asyncio.gather(*tasks, return_exceptions=True)
+                        
+                        # ৮টি অ্যাকাউন্ট থেকেই বোতামে ইনস্ট্যান্ট অটো-ক্লিক
+                        tasks = []
+                        for idx, client in enumerate(clients, start=1):
+                            # Direct Event-based click for maximum compatibility
+                            tasks.append(client(events.CallbackQuery(event).click(i=row_idx, j=col_idx)))
+                            logging.info(f"🔘 [Account {idx}] Direct Auto-Clicking Participate!")
+                        
+                        await asyncio.gather(*tasks, return_exceptions=True)
+                        break
+                if button_found:
+                    break
+        except Exception as e:
+            # Fallback Click
+            try:
+                processed_giveaways.add(giveaway_key)
+                tasks = [event.click(0) for _ in clients]
+                await asyncio.gather(*tasks, return_exceptions=True)
+                logging.info("🔘 Fallback Auto-Clicked first button!")
+            except Exception as ex:
+                logging.error(f"Click Error: {ex}")
 
 async def handle_incoming_message(event):
-    # Bot Auto-Verification (Members Only handling)
+    # ১. বোতাম থাকলে সবার আগে অটো-ক্লিক চেক করবে (Participate Button)
+    if event.reply_markup:
+        await click_participate_button(event)
+
+    # ২. বটের মেম্বারশিপ ভেরিফিকেশন হ্যান্ডলার
     if event.sender_id and event.chat and getattr(event.chat, 'username', '') == BOT_USERNAME:
         msg_text = event.message.message or ""
         if "Members only" in msg_text or "subscribed" in msg_text:
@@ -74,13 +93,11 @@ async def handle_incoming_message(event):
                     for button in row:
                         if "subscribed" in (button.text or "").lower():
                             await button.click()
-                            logging.info("✅ Auto-clicked 'I've subscribed' button in bot!")
+                            logging.info("✅ Auto-clicked 'I've subscribed'")
             return
 
+    # ৩. প্রমো কোড এক্সট্রাকশন ও ব্রডকাস্ট
     message_text = event.message.message or ""
-    extracted_code = None
-
-    # Code Extraction
     if "NEW PROMO CODE" in message_text or "Code:" in message_text or "Code" in message_text:
         match = re.search(r'Code\s*[:\-]?\s*([A-Za-z0-9\-]{5,})', message_text, re.IGNORECASE)
         if match:
@@ -94,13 +111,13 @@ async def handle_incoming_message(event):
 
                 if candidate_code not in processed_codes:
                     processed_codes[candidate_code] = current_time
-                    extracted_code = candidate_code
-                    logging.info(f"🚀 New Code Detected: {extracted_code}")
+                    
+                    # কোড সাথে সাথে বটে সেন্ড করা
+                    tasks = [client.send_message(BOT_USERNAME, candidate_code) for client in clients]
+                    logging.info(f"🚀 Direct Promo Code Sent: {candidate_code}")
+                    await asyncio.gather(*tasks, return_exceptions=True)
 
-    # Process Code and/or Participate Button
-    await broadcast_action(extracted_code, event)
-
-# NewMessage & MessageEdited Duto Event-i Catch Korbe
+# Event Handlers (NewMessage + MessageEdited)
 for client in clients:
     client.add_event_handler(handle_incoming_message, events.NewMessage())
     client.add_event_handler(handle_incoming_message, events.MessageEdited())
@@ -110,12 +127,10 @@ def run_telegram_bot():
     asyncio.set_event_loop(loop)
     
     async def main_bot():
-        print(f"🚀 Render Multi-Account Auto-Claimer Active with {len(clients)} Accounts...")
+        print(f"🚀 Telethon Auto-Claimer Active with {len(clients)} Accounts...")
         if clients:
             await asyncio.gather(*(c.start() for c in clients))
             await asyncio.gather(*(c.run_until_disconnected() for c in clients))
-        else:
-            print("⚠️ No String Sessions found!")
         
     loop.run_until_complete(main_bot())
 
@@ -123,3 +138,4 @@ if __name__ == '__main__':
     threading.Thread(target=run_telegram_bot, daemon=True).start()
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
+                                 

@@ -40,30 +40,31 @@ def home():
     return f"Telegram Multi-Claimer is Active with {len(clients)} accounts!"
 
 async def broadcast_action(extracted_code, event):
-    """কোড বটে পাঠাবে এবং চ্যানেলের বাটনে (Participate/Activate) অটো ক্লিক করবে"""
     tasks = []
     
-    # ১. যদি প্রোমো কোড থাকে তবে বট চ্যাটে সরাসরি কোডটি সেন্ড করা
+    # ১. প্রোমো কোড থাকলে বোটে সরাসরি কোড পাঠানো (আপনার মূল ওয়ার্কিং লজিক)
     if extracted_code:
         for index, client in enumerate(clients, start=1):
             tasks.append(client.send_message(BOT_USERNAME, extracted_code))
             logging.info(f"⚡ [Account {index}] Instant Code '{extracted_code}' queueing...")
 
-    # ২. চ্যানেল পোস্টে ইনলাইন বাটন (Participate / Activate in bot) থাকলে তাতেই ক্লিক করা
+    # ২. চ্যানেল পোস্টে "Activate" বা "Participate" Inline Button থাকলে তাতে ক্লিক করা
     if event.buttons:
         for row in event.buttons:
             for button in row:
-                for index, client in enumerate(clients, start=1):
-                    # Telethon এর event.click() বা button.click() ব্যবহার করে ক্লিকে অংশগ্রহণ
-                    tasks.append(event.click(row.index(button)))
-                    logging.info(f"🔘 [Account {index}] Clicking Giveaway Participate/Activate button!")
+                btn_text = (button.text or "").lower()
+                # শুধুমাত্র চ্যানেলের গিভঅ্যাওয়ে বা অ্যাক্টিভেট বাটনে ক্লিক করবে
+                if "activate" in btn_text or "participate" in btn_text or "join" in btn_text:
+                    for index, client in enumerate(clients, start=1):
+                        tasks.append(button.click())
+                        logging.info(f"🔘 [Account {index}] Clicked Giveaway Button: {button.text}")
 
     await asyncio.gather(*tasks, return_exceptions=True)
 
 async def handle_incoming_message(event):
     message_text = event.message.message or ""
 
-    # কেস ১: প্রোমো কোড মেসেজ রিড ও এক্সট্র্যাক্ট করা (আপনার আগের ১০০% পারফেক্ট লজিক)
+    # কেস ১: প্রোমো কোড মেসেজ রিড ও এক্সট্র্যাক্ট করা (আপনার মূল টেস্টেড লজিক)
     if "NEW PROMO CODE" in message_text or "Code:" in message_text or "Code" in message_text:
         match = re.search(r'Code\s*[:\-]?\s*([A-Za-z0-9\-]{5,})', message_text, re.IGNORECASE)
         
@@ -71,7 +72,7 @@ async def handle_incoming_message(event):
             extracted_code = match.group(1).strip()
             current_time = time.time()
             
-            # SPAM PREVENTION & TIME-BASED EXPIRY SYSTEM (30 Min Lock)
+            # SPAM PREVENTION & 30-MIN LOCK SYSTEM
             async with lock:
                 expired_keys = [code for code, timestamp in processed_codes.items() if current_time - timestamp > CODE_EXPIRY_SECONDS]
                 for code in expired_keys:
@@ -86,10 +87,11 @@ async def handle_incoming_message(event):
             await broadcast_action(extracted_code, event)
             return
 
-    # কেস ২: ডাইরেক্ট গিভঅ্যাওয়ে বাটন পোস্ট (যেমন: Giveaway, Press the button to join, Participate)
-    if event.buttons or "Giveaway" in message_text or "Participate" in message_text:
-        logging.info(f"🎉 New Giveaway Post Detected! Triggering participate buttons for all accounts...")
-        await broadcast_action(None, event)
+    # কেস ২: গিভঅ্যাওয়ে পোস্ট (যেমন: Giveaway, Press the button to join, Participate)
+    elif "giveaway" in message_text.lower() or "participate" in message_text.lower():
+        if event.buttons:
+            logging.info(f"🎉 Giveaway Post Detected! Clicking participate buttons...")
+            await broadcast_action(None, event)
 
 # ৪টি অ্যাকাউন্টেই ইভেন্ট হ্যান্ডলার যুক্ত করা
 for client in clients:

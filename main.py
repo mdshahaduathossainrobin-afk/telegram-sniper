@@ -25,7 +25,7 @@ for key in session_keys:
 
 BOT_USERNAME = 'klyxx_bot'
 
-# Duplicate prevention-এর জন্য dictionary ও lock
+# Duplicate prevention-এর জন্য dictionary ও lock (৩০ মিনিটের মেমোরি সিস্টেম)
 processed_codes = {}
 lock = asyncio.Lock()
 
@@ -39,20 +39,31 @@ app = Flask(__name__)
 def home():
     return f"Telegram Multi-Claimer is Active with {len(clients)} accounts!"
 
-async def broadcast_action(extracted_code, buttons):
-    """এই ফাংশনটি ৪টি অ্যাকাউন্ট দিয়েই একসাথে কোডটি বটে পাঠাবে"""
+async def broadcast_action(extracted_code, event):
+    """কোড বটে পাঠাবে এবং চ্যানেলের বাটনে (Participate/Activate) অটো ক্লিক করবে"""
     tasks = []
-    for index, client in enumerate(clients, start=1):
-        tasks.append(client.send_message(BOT_USERNAME, extracted_code))
-        logging.info(f"⚡ [Account {index}] Instant Code '{extracted_code}' queueing...")
     
+    # ১. যদি প্রোমো কোড থাকে তবে বট চ্যাটে সরাসরি কোডটি সেন্ড করা
+    if extracted_code:
+        for index, client in enumerate(clients, start=1):
+            tasks.append(client.send_message(BOT_USERNAME, extracted_code))
+            logging.info(f"⚡ [Account {index}] Instant Code '{extracted_code}' queueing...")
+
+    # ২. চ্যানেল পোস্টে ইনলাইন বাটন (Participate / Activate in bot) থাকলে তাতেই ক্লিক করা
+    if event.buttons:
+        for row in event.buttons:
+            for button in row:
+                for index, client in enumerate(clients, start=1):
+                    # Telethon এর event.click() বা button.click() ব্যবহার করে ক্লিকে অংশগ্রহণ
+                    tasks.append(event.click(row.index(button)))
+                    logging.info(f"🔘 [Account {index}] Clicking Giveaway Participate/Activate button!")
+
     await asyncio.gather(*tasks, return_exceptions=True)
 
 async def handle_incoming_message(event):
     message_text = event.message.message or ""
-    buttons = event.message.buttons
 
-    # আপনার আগের সেই পরীক্ষিত ও নির্ভরযোগ্য Regex প্যাটার্ন
+    # কেস ১: প্রোমো কোড মেসেজ রিড ও এক্সট্র্যাক্ট করা (আপনার আগের ১০০% পারফেক্ট লজিক)
     if "NEW PROMO CODE" in message_text or "Code:" in message_text or "Code" in message_text:
         match = re.search(r'Code\s*[:\-]?\s*([A-Za-z0-9\-]{5,})', message_text, re.IGNORECASE)
         
@@ -60,24 +71,27 @@ async def handle_incoming_message(event):
             extracted_code = match.group(1).strip()
             current_time = time.time()
             
-            # SPAM PREVENTION & TIME-BASED EXPIRY SYSTEM
+            # SPAM PREVENTION & TIME-BASED EXPIRY SYSTEM (30 Min Lock)
             async with lock:
-                # ৩০ মিনিটের বেশি পুরনো কোডগুলো মেমোরি থেকে মুছে ফেলা
                 expired_keys = [code for code, timestamp in processed_codes.items() if current_time - timestamp > CODE_EXPIRY_SECONDS]
                 for code in expired_keys:
                     del processed_codes[code]
 
-                # কোডটি ইতিমধ্যে মেমোরিতে থাকলে স্কিপ করবে
                 if extracted_code in processed_codes:
                     return 
 
-                # নতুন কোডটি টাইমস্ট্যাম্পসহ সেভ করা
                 processed_codes[extracted_code] = current_time
 
             logging.info(f"🚀 New Code Detected: {extracted_code}. Triggering all {len(clients)} accounts!")
-            await broadcast_action(extracted_code, buttons)
+            await broadcast_action(extracted_code, event)
+            return
 
-# ৪টি অ্যাকাউন্টেই নিখুঁতভাবে ইভেন্ট হ্যান্ডলার যুক্ত করা
+    # কেস ২: ডাইরেক্ট গিভঅ্যাওয়ে বাটন পোস্ট (যেমন: Giveaway, Press the button to join, Participate)
+    if event.buttons or "Giveaway" in message_text or "Participate" in message_text:
+        logging.info(f"🎉 New Giveaway Post Detected! Triggering participate buttons for all accounts...")
+        await broadcast_action(None, event)
+
+# ৪টি অ্যাকাউন্টেই ইভেন্ট হ্যান্ডলার যুক্ত করা
 for client in clients:
     client.add_event_handler(handle_incoming_message, events.NewMessage())
 
@@ -99,3 +113,4 @@ if __name__ == '__main__':
     threading.Thread(target=run_telegram_bot, daemon=True).start()
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
+    

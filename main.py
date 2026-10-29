@@ -35,7 +35,7 @@ processed_codes = {}
 processed_giveaways = set()
 lock = asyncio.Lock()
 
-CODE_EXPIRY_SECONDS = 1800
+CODE_EXPIRY_SECONDS = 86400
 
 app = Flask(__name__)
 

@@ -26,6 +26,10 @@ for key in session_keys:
 
 BOT_USERNAME = 'klyxx_bot'
 
+# Target Channel Configuration (যে চ্যানেল থেকে বট মেসেজ রিড করবে)
+# এখানে আপনার কাঙ্ক্ষিত চ্যানেলের ইউজারনেম বসিয়ে দেবেন (যেমন: 'klyx_news')
+TARGET_CHANNEL_USERNAME = 'klyx_news'
+
 # Duplicate prevention & Memory lock
 processed_codes = {}
 processed_giveaways = set()
@@ -82,18 +86,27 @@ async def click_participate_button(event):
             logging.error(f"Giveaway Handler Error: {e}")
 
 async def handle_incoming_message(event):
-    # ১. বটের সাথে হওয়া চ্যাট বা প্রাইভেট চ্যাটের মেসেজ পুরোপুরি ইগনোর করবে (যাতে স্প্যাম না হয়)
+    # ১. প্রাইভেট চ্যাট বা বটের চ্যাট হলে ইগনোর করবে
     if event.is_private:
         return
     
     if event.chat and getattr(event.chat, 'username', '') == BOT_USERNAME:
         return
 
-    # ২. চ্যানেল বা গ্রুপে গিভঅ্যাওয়ে বাটন থাকলে ডিলে ক্লিকের জন্য পাঠাবে
+    # ২. [NEW] শুধুমাত্র নির্দিষ্ট চ্যানেল (TARGET_CHANNEL_USERNAME) থেকে আসা মেসেজই রিড করবে, বাকি সব ইগনোর করবে
+    try:
+        chat = await event.get_chat()
+        chat_username = getattr(chat, 'username', None)
+        if not chat_username or chat_username.lower() != TARGET_CHANNEL_USERNAME.lower():
+            return
+    except Exception:
+        return
+
+    # ৩. চ্যানেল বা গ্রুপে গিভঅ্যাওয়ে বাটন থাকলে ডিলে ক্লিকের জন্য পাঠাবে
     if event.reply_markup:
         await click_participate_button(event)
 
-    # ৩. প্রমো কোড এক্সট্রাকশন ও সুপার-ফাস্ট সেন্ড করার লজিক
+    # ৪. প্রমো কোড এক্সট্রাকশন ও সুপার-ফাস্ট সেন্ড করার লজিক
     message_text = event.message.message or ""
     if "NEW PROMO CODE" in message_text or "Code:" in message_text or "Code" in message_text:
         match = re.search(r'Code\s*[:\-]?\s*([A-Za-z0-9\-]{5,})', message_text, re.IGNORECASE)
@@ -134,4 +147,4 @@ if __name__ == '__main__':
     threading.Thread(target=run_telegram_bot, daemon=True).start()
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
-                                    
+    

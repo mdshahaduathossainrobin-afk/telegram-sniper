@@ -1,3 +1,5 @@
 telethon
 flask
+gunicorn
+pytz
 python-dotenv

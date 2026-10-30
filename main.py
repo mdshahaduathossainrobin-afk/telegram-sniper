@@ -1,6 +1,8 @@
 import logging
 import asyncio
 import os
+from dotenv import load_dotenv
+load_dotenv()
 import re
 import threading
 import time
@@ -26,8 +28,7 @@ for key in session_keys:
 
 BOT_USERNAME = 'klyxx_bot'
 
-# Target Channel Configuration (যে চ্যানেল থেকে বট মেসেজ রিড করবে)
-# এখানে আপনার কাঙ্ক্ষিত চ্যানেলের ইউজারনেম বসিয়ে দেবেন (যেমন: 'klyx_news')
+# Target Channel Configuration (je channel theke bot message read korbe)
 TARGET_CHANNEL_USERNAME = 'klyx_news'
 
 # Duplicate prevention & Memory lock
@@ -45,7 +46,7 @@ def home():
 
 async def click_participate_button(event):
     """
-    চ্যানেল বা গ্রুপে আসা গিভঅ্যাওয়ে বাটন ২০-৩০ সেকেন্ড পর ক্লিক করার নিরাপদ লজিক
+    Channel ba group-e asa giveaway button 20-30 second por click korar nirapod logic
     """
     giveaway_key = f"{event.chat_id}_{event.id}"
     
@@ -58,7 +59,6 @@ async def click_participate_button(event):
             for row_idx, row in enumerate(event.reply_markup.rows):
                 for col_idx, button in enumerate(row.buttons):
                     btn_text = getattr(button, 'text', '') or ""
-                    # গিভঅ্যাওয়ে বা পার্টিসিপেট সংক্রান্ত বাটনগুলো ফিল্টার করা
                     if any(keyword in btn_text.lower() for keyword in ["participate", "join", "giveaway", "enter"]):
                         button_found = True
                         processed_giveaways.add(giveaway_key)
@@ -86,14 +86,14 @@ async def click_participate_button(event):
             logging.error(f"Giveaway Handler Error: {e}")
 
 async def handle_incoming_message(event):
-    # ১. প্রাইভেট চ্যাট বা বটের চ্যাট হলে ইগনোর করবে
+    # 1. Private chat ba bot-er chat hole ignore korbe
     if event.is_private:
         return
     
     if event.chat and getattr(event.chat, 'username', '') == BOT_USERNAME:
         return
 
-    # ২. [NEW] শুধুমাত্র নির্দিষ্ট চ্যানেল (TARGET_CHANNEL_USERNAME) থেকে আসা মেসেজই রিড করবে, বাকি সব ইগনোর করবে
+    # 2. Sudhu nirdisto channel (TARGET_CHANNEL_USERNAME) theke asa message-i read korbe
     try:
         chat = await event.get_chat()
         chat_username = getattr(chat, 'username', None)
@@ -102,15 +102,18 @@ async def handle_incoming_message(event):
     except Exception:
         return
 
-    # ৩. চ্যানেল বা গ্রুপে গিভঅ্যাওয়ে বাটন থাকলে ডিলে ক্লিকের জন্য পাঠাবে
+    # 3. Channel ba group-e giveaway button thakle delay click er jonno pathabe
     if event.reply_markup:
         await click_participate_button(event)
 
-    # ৪. প্রমো কোড এক্সট্রাকশন ও সুপার-ফাস্ট সেন্ড করার লজিক
+    # 4. Promo code extraction o super-fast send korar logic (Step-by-step Timing Included)
     message_text = event.message.message or ""
     if "NEW PROMO CODE" in message_text or "Code:" in message_text or "Code" in message_text:
+        t_detect = time.time()  # Message detect howar somoy
+        
         match = re.search(r'Code\s*[:\-]?\s*([A-Za-z0-9\-]{5,})', message_text, re.IGNORECASE)
         if match:
+            t_extract = time.time()  # Code extract howar somoy
             candidate_code = match.group(1).strip()
             current_time = time.time()
             
@@ -123,7 +126,10 @@ async def handle_incoming_message(event):
                     processed_codes[candidate_code] = current_time
                     
                     tasks = [client.send_message(BOT_USERNAME, candidate_code) for client in clients]
-                    logging.info(f"🚀 Direct Promo Code Sent: {candidate_code}")
+                    
+                    # Detect theke extract ebong extract theke send howar somoy millisecond-e log kora
+                    logging.info(f"🚀 Direct Promo Code Sent: {candidate_code} | Detect->Extract: {(t_extract - t_detect)*1000:.2f}ms | Extract->Send: {(time.time() - t_extract)*1000:.2f}ms")
+                    
                     await asyncio.gather(*tasks, return_exceptions=True)
 
 # Event Handlers (NewMessage + MessageEdited)
@@ -147,4 +153,4 @@ if __name__ == '__main__':
     threading.Thread(target=run_telegram_bot, daemon=True).start()
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
-    
+                    

@@ -7,6 +7,8 @@ import re
 import threading
 import time
 import random
+from datetime import datetime
+import pytz
 from flask import Flask
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
@@ -27,8 +29,6 @@ for key in session_keys:
         clients.append(TelegramClient(StringSession(session_val), API_ID, API_HASH))
 
 BOT_USERNAME = 'klyxx_bot'
-
-# Target Channel Configuration (je channel theke bot message read korbe)
 TARGET_CHANNEL_USERNAME = 'klyx_news'
 
 # Duplicate prevention & Memory lock
@@ -38,15 +38,20 @@ lock = asyncio.Lock()
 
 CODE_EXPIRY_SECONDS = 86400
 
+# বাংলাদেশ টাইমজোন সেট আপ
+bd_tz = pytz.timezone('Asia/Dhaka')
+
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return f"Telegram Multi-Claimer is Active with {len(clients)} accounts!"
+    now = datetime.now(bd_tz)
+    status = "Active & Hunting" if not (5 <= now.hour < 15) else "Resting Mode (5 AM - 3 PM)"
+    return f"Telegram Multi-Claimer is Active with {len(clients)} accounts! Status: {status}"
 
 async def click_participate_button(event):
     """
-    Channel ba group-e asa giveaway button 20-30 second por click korar nirapod logic
+    গিভঅ্যাওয়ে বাটন ২০-৩০ সেকেন্ড পর ক্লিক করার নিরাপদ লজিক
     """
     giveaway_key = f"{event.chat_id}_{event.id}"
     
@@ -65,7 +70,7 @@ async def click_participate_button(event):
                         
                         async def delayed_click():
                             wait_time = random.uniform(20.0, 30.0)
-                            logging.info(f"⏳ Giveaway detected in channel! Waiting {wait_time:.1f} seconds before clicking...")
+                            logging.info(f"⏳ Giveaway detected! Waiting {wait_time:.1f} seconds...")
                             await asyncio.sleep(wait_time)
                             
                             for idx, client in enumerate(clients, start=1):
@@ -74,7 +79,7 @@ async def click_participate_button(event):
                                     msg_obj = await client.get_messages(event.chat_id, ids=event.id)
                                     if msg_obj:
                                         await msg_obj.click(i=row_idx, j=col_idx)
-                                        logging.info(f"🔘 [Account {idx}] Successfully Clicked Giveaway Button after delay!")
+                                        logging.info(f"🔘 [Account {idx}] Clicked Giveaway Button!")
                                 except Exception as client_err:
                                     logging.error(f"Account {idx} click error: {client_err}")
 
@@ -86,14 +91,17 @@ async def click_participate_button(event):
             logging.error(f"Giveaway Handler Error: {e}")
 
 async def handle_incoming_message(event):
-    # 1. Private chat ba bot-er chat hole ignore korbe
+    # সকাল ৫টা থেকে দুপুর ৩টা পর্যন্ত বট রিকোয়েস্ট পাঠানো থেকে বিরত থাকবে
+    now = datetime.now(bd_tz)
+    if 5 <= now.hour < 15:
+        return
+
     if event.is_private:
         return
     
     if event.chat and getattr(event.chat, 'username', '') == BOT_USERNAME:
         return
 
-    # 2. Sudhu nirdisto channel (TARGET_CHANNEL_USERNAME) theke asa message-i read korbe
     try:
         chat = await event.get_chat()
         chat_username = getattr(chat, 'username', None)
@@ -102,18 +110,14 @@ async def handle_incoming_message(event):
     except Exception:
         return
 
-    # 3. Channel ba group-e giveaway button thakle delay click er jonno pathabe
     if event.reply_markup:
         await click_participate_button(event)
 
-    # 4. Promo code extraction o super-fast send korar logic (Step-by-step Timing Included)
+    # সুপার-ফাস্ট কোড এক্সট্রাকশন ও সেন্ড করার লজিক (পুরোনো কোডের মতো ক্লিন স্পিড)
     message_text = event.message.message or ""
     if "NEW PROMO CODE" in message_text or "Code:" in message_text or "Code" in message_text:
-        t_detect = time.time()  # Message detect howar somoy
-        
         match = re.search(r'Code\s*[:\-]?\s*([A-Za-z0-9\-]{5,})', message_text, re.IGNORECASE)
         if match:
-            t_extract = time.time()  # Code extract howar somoy
             candidate_code = match.group(1).strip()
             current_time = time.time()
             
@@ -126,13 +130,10 @@ async def handle_incoming_message(event):
                     processed_codes[candidate_code] = current_time
                     
                     tasks = [client.send_message(BOT_USERNAME, candidate_code) for client in clients]
-                    
-                    # Detect theke extract ebong extract theke send howar somoy millisecond-e log kora
-                    logging.info(f"🚀 Direct Promo Code Sent: {candidate_code} | Detect->Extract: {(t_extract - t_detect)*1000:.2f}ms | Extract->Send: {(time.time() - t_extract)*1000:.2f}ms")
-                    
+                    logging.info(f"🚀 Direct Promo Code Sent: {candidate_code}")
                     await asyncio.gather(*tasks, return_exceptions=True)
 
-# Event Handlers (NewMessage + MessageEdited)
+# Event Handlers
 for client in clients:
     client.add_event_handler(handle_incoming_message, events.NewMessage())
     client.add_event_handler(handle_incoming_message, events.MessageEdited())
@@ -153,4 +154,4 @@ if __name__ == '__main__':
     threading.Thread(target=run_telegram_bot, daemon=True).start()
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
-        
+                        

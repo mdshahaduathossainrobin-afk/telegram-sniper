@@ -1,14 +1,10 @@
 import logging
 import asyncio
 import os
-from dotenv import load_dotenv
-load_dotenv()
 import re
 import threading
 import time
 import random
-from datetime import datetime
-import pytz
 from flask import Flask
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
@@ -29,6 +25,9 @@ for key in session_keys:
         clients.append(TelegramClient(StringSession(session_val), API_ID, API_HASH))
 
 BOT_USERNAME = 'klyxx_bot'
+
+# Target Channel Configuration (যে চ্যানেল থেকে বট মেসেজ রিড করবে)
+# এখানে আপনার কাঙ্ক্ষিত চ্যানেলের ইউজারনেম বসিয়ে দেবেন (যেমন: 'klyx_news')
 TARGET_CHANNEL_USERNAME = 'klyx_news'
 
 # Duplicate prevention & Memory lock
@@ -38,20 +37,15 @@ lock = asyncio.Lock()
 
 CODE_EXPIRY_SECONDS = 86400
 
-# বাংলাদেশ টাইমজোন সেট আপ
-bd_tz = pytz.timezone('Asia/Dhaka')
-
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    now = datetime.now(bd_tz)
-    status = "Active & Hunting" if not (5 <= now.hour < 15) else "Resting Mode (5 AM - 3 PM)"
-    return f"Telegram Multi-Claimer is Active with {len(clients)} accounts! Status: {status}"
+    return f"Telegram Multi-Claimer is Active with {len(clients)} accounts!"
 
 async def click_participate_button(event):
     """
-    গিভঅ্যাওয়ে বাটন ২০-৩০ সেকেন্ড পর ক্লিক করার নিরাপদ লজিক
+    চ্যানেল বা গ্রুপে আসা গিভঅ্যাওয়ে বাটন ২০-৩০ সেকেন্ড পর ক্লিক করার নিরাপদ লজিক
     """
     giveaway_key = f"{event.chat_id}_{event.id}"
     
@@ -64,13 +58,14 @@ async def click_participate_button(event):
             for row_idx, row in enumerate(event.reply_markup.rows):
                 for col_idx, button in enumerate(row.buttons):
                     btn_text = getattr(button, 'text', '') or ""
+                    # গিভঅ্যাওয়ে বা পার্টিসিপেট সংক্রান্ত বাটনগুলো ফিল্টার করা
                     if any(keyword in btn_text.lower() for keyword in ["participate", "join", "giveaway", "enter"]):
                         button_found = True
                         processed_giveaways.add(giveaway_key)
                         
                         async def delayed_click():
                             wait_time = random.uniform(20.0, 30.0)
-                            logging.info(f"⏳ Giveaway detected! Waiting {wait_time:.1f} seconds...")
+                            logging.info(f"⏳ Giveaway detected in channel! Waiting {wait_time:.1f} seconds before clicking...")
                             await asyncio.sleep(wait_time)
                             
                             for idx, client in enumerate(clients, start=1):
@@ -79,7 +74,7 @@ async def click_participate_button(event):
                                     msg_obj = await client.get_messages(event.chat_id, ids=event.id)
                                     if msg_obj:
                                         await msg_obj.click(i=row_idx, j=col_idx)
-                                        logging.info(f"🔘 [Account {idx}] Clicked Giveaway Button!")
+                                        logging.info(f"🔘 [Account {idx}] Successfully Clicked Giveaway Button after delay!")
                                 except Exception as client_err:
                                     logging.error(f"Account {idx} click error: {client_err}")
 
@@ -91,17 +86,14 @@ async def click_participate_button(event):
             logging.error(f"Giveaway Handler Error: {e}")
 
 async def handle_incoming_message(event):
-    # সকাল ৫টা থেকে দুপুর ৩টা পর্যন্ত বট রিকোয়েস্ট পাঠানো থেকে বিরত থাকবে
-    now = datetime.now(bd_tz)
-    if 5 <= now.hour < 15:
-        return
-
+    # ১. প্রাইভেট চ্যাট বা বটের চ্যাট হলে ইগনোর করবে
     if event.is_private:
         return
     
     if event.chat and getattr(event.chat, 'username', '') == BOT_USERNAME:
         return
 
+    # ২. [NEW] শুধুমাত্র নির্দিষ্ট চ্যানেল (TARGET_CHANNEL_USERNAME) থেকে আসা মেসেজই রিড করবে, বাকি সব ইগনোর করবে
     try:
         chat = await event.get_chat()
         chat_username = getattr(chat, 'username', None)
@@ -110,10 +102,11 @@ async def handle_incoming_message(event):
     except Exception:
         return
 
+    # ৩. চ্যানেল বা গ্রুপে গিভঅ্যাওয়ে বাটন থাকলে ডিলে ক্লিকের জন্য পাঠাবে
     if event.reply_markup:
         await click_participate_button(event)
 
-    # সুপার-ফাস্ট কোড এক্সট্রাকশন ও সেন্ড করার লজিক (পুরোনো কোডের মতো ক্লিন স্পিড)
+    # ৪. প্রমো কোড এক্সট্রাকশন ও সুপার-ফাস্ট সেন্ড করার লজিক
     message_text = event.message.message or ""
     if "NEW PROMO CODE" in message_text or "Code:" in message_text or "Code" in message_text:
         match = re.search(r'Code\s*[:\-]?\s*([A-Za-z0-9\-]{5,})', message_text, re.IGNORECASE)
@@ -133,7 +126,7 @@ async def handle_incoming_message(event):
                     logging.info(f"🚀 Direct Promo Code Sent: {candidate_code}")
                     await asyncio.gather(*tasks, return_exceptions=True)
 
-# Event Handlers
+# Event Handlers (NewMessage + MessageEdited)
 for client in clients:
     client.add_event_handler(handle_incoming_message, events.NewMessage())
     client.add_event_handler(handle_incoming_message, events.MessageEdited())
@@ -154,4 +147,4 @@ if __name__ == '__main__':
     threading.Thread(target=run_telegram_bot, daemon=True).start()
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
-                        
+    
